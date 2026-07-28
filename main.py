@@ -1,4 +1,5 @@
 import os
+import traceback
 from typing import Any
 
 import uvicorn
@@ -9,7 +10,7 @@ from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="MCP-Enabled Platform-Hosted Agent",
-    version="1.1.0",
+    version="1.2.0",
 )
 
 
@@ -25,7 +26,11 @@ class ChatResponse(BaseModel):
 
 def create_mcp_client() -> MultiServerMCPClient:
     raw_urls = os.environ.get("SIMPLE_TEST_MCP_URL", "")
-    mcp_urls = [url.strip() for url in raw_urls.split(",") if url.strip()]
+    mcp_urls = [
+        url.strip()
+        for url in raw_urls.split(",")
+        if url.strip()
+    ]
 
     mcp_api_key = os.environ.get(
         "SIMPLE_TEST_MCP_API_KEY",
@@ -33,20 +38,25 @@ def create_mcp_client() -> MultiServerMCPClient:
     ).strip()
 
     if not mcp_urls:
-        raise RuntimeError("SIMPLE_TEST_MCP_URL is not configured")
+        raise RuntimeError(
+            "SIMPLE_TEST_MCP_URL is not configured"
+        )
+
+    if not mcp_api_key:
+        raise RuntimeError(
+            "SIMPLE_TEST_MCP_API_KEY is not configured"
+        )
 
     server_configs: dict[str, dict[str, Any]] = {}
 
     for index, url in enumerate(mcp_urls):
-        headers: dict[str, str] = {}
-
-        if mcp_api_key:
-            headers["API-Key"] = mcp_api_key
-
         server_configs[f"simple_test_mcp_{index}"] = {
             "url": url,
-            "transport": "http",
-            "headers": headers,
+            "transport": "streamable_http",
+            "headers": {
+                "API-Key": mcp_api_key,
+                "X-API-Key": mcp_api_key,
+            },
         }
 
     return MultiServerMCPClient(server_configs)
@@ -57,15 +67,24 @@ async def call_mcp_tool(
     arguments: dict[str, Any],
 ) -> Any:
     client = create_mcp_client()
+
     tools = await client.get_tools()
 
     selected_tool = next(
-        (tool for tool in tools if tool.name == tool_name),
+        (
+            tool
+            for tool in tools
+            if tool.name == tool_name
+        ),
         None,
     )
 
     if selected_tool is None:
-        available_tools = [tool.name for tool in tools]
+        available_tools = [
+            tool.name
+            for tool in tools
+        ]
+
         raise RuntimeError(
             f"MCP tool '{tool_name}' was not found. "
             f"Available tools: {available_tools}"
@@ -76,12 +95,52 @@ async def call_mcp_tool(
 
 @app.get("/")
 def root() -> dict[str, str]:
-    return {"status": "Agent is running"}
+    return {
+        "status": "Agent is running",
+        "mcp_url_configured": str(
+            bool(os.environ.get("SIMPLE_TEST_MCP_URL"))
+        ),
+        "mcp_api_key_configured": str(
+            bool(os.environ.get("SIMPLE_TEST_MCP_API_KEY"))
+        ),
+    }
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "healthy"}
+    return {
+        "status": "healthy"
+    }
+
+
+@app.get("/mcp/tools")
+async def list_mcp_tools() -> dict[str, Any]:
+    try:
+        client = create_mcp_client()
+        tools = await client.get_tools()
+
+        return {
+            "count": len(tools),
+            "tools": [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                }
+                for tool in tools
+            ],
+        }
+
+    except Exception as exc:
+        traceback.print_exception(
+            type(exc),
+            exc,
+            exc.__traceback__,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load MCP tools: {repr(exc)}",
+        ) from exc
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -117,15 +176,21 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
         return ChatResponse(
             response=(
-                "Ask me to 'add' two numbers or 'greet' someone "
+                "Ask me to add numbers or greet someone "
                 "to test the configured MCP server."
             )
         )
 
     except Exception as exc:
+        traceback.print_exception(
+            type(exc),
+            exc,
+            exc.__traceback__,
+        )
+
         raise HTTPException(
             status_code=500,
-            detail=f"MCP invocation failed: {exc}",
+            detail=f"MCP invocation failed: {repr(exc)}",
         ) from exc
 
 
