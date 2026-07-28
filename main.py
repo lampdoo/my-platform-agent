@@ -1,4 +1,5 @@
 import os
+import re
 import traceback
 from typing import Any
 
@@ -10,7 +11,7 @@ from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="MCP-Enabled Platform-Hosted Agent",
-    version="1.5.0",
+    version="1.6.0",
 )
 
 
@@ -24,7 +25,26 @@ class ChatResponse(BaseModel):
     response: str
 
 
-def get_mcp_urls() -> list[str]:
+def correct_mcp_url(url: str) -> str:
+    """
+    Workaround for the Agent Manager v0.18.0 generated MCP binding URL.
+
+    Example generated URL:
+    /default/Simple Test MCP/simple-tes-a974444fd831b852/mcp
+
+    Correct gateway URL:
+    /default/Simple Test MCP/mcp
+    """
+
+    return re.sub(
+        r"/simple-tes-[^/]+/mcp/?$",
+        "/mcp",
+        url.strip(),
+        flags=re.IGNORECASE,
+    )
+
+
+def get_raw_mcp_urls() -> list[str]:
     raw_urls = os.environ.get(
         "SIMPLE_TEST_MCP_URL",
         "",
@@ -34,6 +54,13 @@ def get_mcp_urls() -> list[str]:
         url.strip()
         for url in raw_urls.split(",")
         if url.strip()
+    ]
+
+
+def get_mcp_urls() -> list[str]:
+    return [
+        correct_mcp_url(url)
+        for url in get_raw_mcp_urls()
     ]
 
 
@@ -63,7 +90,7 @@ def create_mcp_client() -> MultiServerMCPClient:
             "url": url,
             "transport": "streamable_http",
             "headers": {
-                "X-API-Key": mcp_api_key,
+                "API-Key": mcp_api_key,
                 "Authorization": "",
             },
         }
@@ -111,8 +138,8 @@ async def call_mcp_tool(
 def root() -> dict[str, Any]:
     return {
         "status": "Agent is running",
-        "version": "1.5.0",
-        "mcp_url_configured": bool(get_mcp_urls()),
+        "version": "1.6.0",
+        "mcp_url_configured": bool(get_raw_mcp_urls()),
         "mcp_api_key_configured": bool(get_mcp_api_key()),
     }
 
@@ -127,14 +154,18 @@ def health() -> dict[str, str]:
 @app.get("/mcp/config")
 def mcp_config() -> dict[str, Any]:
     """
-    Confirms that WSO2 injected the MCP configuration.
-    The actual API key is never returned.
+    Diagnostic endpoint.
+
+    Shows the injected and corrected MCP URLs without exposing
+    the MCP API key.
     """
+
     return {
-        "urls": get_mcp_urls(),
-        "url_configured": bool(get_mcp_urls()),
+        "raw_urls": get_raw_mcp_urls(),
+        "corrected_urls": get_mcp_urls(),
+        "url_configured": bool(get_raw_mcp_urls()),
         "api_key_configured": bool(get_mcp_api_key()),
-        "api_key_header": "X-API-Key",
+        "api_key_header": "API-Key",
         "transport": "streamable_http",
     }
 
