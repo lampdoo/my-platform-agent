@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="MCP-Enabled Platform-Hosted Agent",
-    version="1.7.0",
+    version="1.8.0",
 )
 
 
@@ -63,7 +63,7 @@ def create_mcp_client() -> MultiServerMCPClient:
             "url": url,
             "transport": "streamable_http",
             "headers": {
-                "API-Key": mcp_api_key,
+                "X-API-Key": mcp_api_key,
                 "Authorization": "",
             },
         }
@@ -111,7 +111,7 @@ async def call_mcp_tool(
 def root() -> dict[str, Any]:
     return {
         "status": "Agent is running",
-        "version": "1.7.0",
+        "version": "1.8.0",
         "mcp_url_configured": bool(get_mcp_urls()),
         "mcp_api_key_configured": bool(get_mcp_api_key()),
     }
@@ -127,8 +127,8 @@ def health() -> dict[str, str]:
 @app.get("/mcp/config")
 def mcp_config() -> dict[str, Any]:
     """
-    Confirms that WSO2 injected the new MCP configuration.
-    The MCP API key itself is never returned.
+    Confirms that WSO2 injected the MCP configuration.
+    The actual MCP API key is never returned.
     """
 
     return {
@@ -137,7 +137,7 @@ def mcp_config() -> dict[str, Any]:
         "api_key_configured": bool(get_mcp_api_key()),
         "url_variable": "SIMPLETESTMCP_URL",
         "api_key_variable": "SIMPLETESTMCP_API_KEY",
-        "api_key_header": "API-Key",
+        "api_key_header": "X-API-Key",
         "transport": "streamable_http",
     }
 
