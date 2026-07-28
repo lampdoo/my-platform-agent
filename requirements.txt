@@ -1,5 +1,5 @@
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
 pydantic==2.11.4
-mcp
-langchain-mcp-adapters
+mcp==1.12.4
+langchain-mcp-adapters==0.1.9
