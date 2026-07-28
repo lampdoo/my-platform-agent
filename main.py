@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="MCP-Enabled Platform-Hosted Agent",
-    version="1.2.0",
+    version="1.3.0",
 )
 
 
@@ -24,13 +24,18 @@ class ChatResponse(BaseModel):
     response: str
 
 
-def create_mcp_client() -> MultiServerMCPClient:
+def get_mcp_urls() -> list[str]:
     raw_urls = os.environ.get("SIMPLE_TEST_MCP_URL", "")
-    mcp_urls = [
+
+    return [
         url.strip()
         for url in raw_urls.split(",")
         if url.strip()
     ]
+
+
+def create_mcp_client() -> MultiServerMCPClient:
+    mcp_urls = get_mcp_urls()
 
     mcp_api_key = os.environ.get(
         "SIMPLE_TEST_MCP_API_KEY",
@@ -55,20 +60,22 @@ def create_mcp_client() -> MultiServerMCPClient:
             "transport": "streamable_http",
             "headers": {
                 "API-Key": mcp_api_key,
-                "X-API-Key": mcp_api_key,
             },
         }
 
     return MultiServerMCPClient(server_configs)
 
 
+async def load_mcp_tools() -> list[Any]:
+    client = create_mcp_client()
+    return await client.get_tools()
+
+
 async def call_mcp_tool(
     tool_name: str,
     arguments: dict[str, Any],
 ) -> Any:
-    client = create_mcp_client()
-
-    tools = await client.get_tools()
+    tools = await load_mcp_tools()
 
     selected_tool = next(
         (
@@ -94,14 +101,15 @@ async def call_mcp_tool(
 
 
 @app.get("/")
-def root() -> dict[str, str]:
+def root() -> dict[str, Any]:
     return {
         "status": "Agent is running",
-        "mcp_url_configured": str(
-            bool(os.environ.get("SIMPLE_TEST_MCP_URL"))
+        "version": "1.3.0",
+        "mcp_url_configured": bool(
+            os.environ.get("SIMPLE_TEST_MCP_URL")
         ),
-        "mcp_api_key_configured": str(
-            bool(os.environ.get("SIMPLE_TEST_MCP_API_KEY"))
+        "mcp_api_key_configured": bool(
+            os.environ.get("SIMPLE_TEST_MCP_API_KEY")
         ),
     }
 
@@ -113,11 +121,29 @@ def health() -> dict[str, str]:
     }
 
 
+@app.get("/mcp/config")
+def mcp_config() -> dict[str, Any]:
+    """
+    Diagnostic endpoint.
+
+    It confirms whether the MCP settings were injected without
+    exposing the actual API key.
+    """
+    return {
+        "urls": get_mcp_urls(),
+        "url_configured": bool(
+            os.environ.get("SIMPLE_TEST_MCP_URL")
+        ),
+        "api_key_configured": bool(
+            os.environ.get("SIMPLE_TEST_MCP_API_KEY")
+        ),
+    }
+
+
 @app.get("/mcp/tools")
 async def list_mcp_tools() -> dict[str, Any]:
     try:
-        client = create_mcp_client()
-        tools = await client.get_tools()
+        tools = await load_mcp_tools()
 
         return {
             "count": len(tools),
@@ -139,33 +165,40 @@ async def list_mcp_tools() -> dict[str, Any]:
 
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to load MCP tools: {repr(exc)}",
+            detail=(
+                "Failed to load MCP tools: "
+                f"{repr(exc)}"
+            ),
         ) from exc
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(
+    request: ChatRequest,
+) -> ChatResponse:
     user_message = request.message.strip()
     normalized_message = user_message.lower()
 
     try:
         if "add" in normalized_message:
             result = await call_mcp_tool(
-                "add_numbers",
-                {
+                tool_name="add_numbers",
+                arguments={
                     "a": 10,
                     "b": 25,
                 },
             )
 
             return ChatResponse(
-                response=f"MCP add_numbers result: {result}"
+                response=(
+                    f"MCP add_numbers result: {result}"
+                )
             )
 
         if "greet" in normalized_message:
             result = await call_mcp_tool(
-                "greet",
-                {
+                tool_name="greet",
+                arguments={
                     "name": "Ahmed",
                 },
             )
@@ -190,7 +223,10 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
         raise HTTPException(
             status_code=500,
-            detail=f"MCP invocation failed: {repr(exc)}",
+            detail=(
+                "MCP invocation failed: "
+                f"{repr(exc)}"
+            ),
         ) from exc
 
 
