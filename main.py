@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="MCP-Enabled Platform-Hosted Agent",
-    version="1.3.0",
+    version="1.4.0",
 )
 
 
@@ -25,7 +25,10 @@ class ChatResponse(BaseModel):
 
 
 def get_mcp_urls() -> list[str]:
-    raw_urls = os.environ.get("SIMPLE_TEST_MCP_URL", "")
+    raw_urls = os.environ.get(
+        "SIMPLE_TEST_MCP_URL",
+        "",
+    )
 
     return [
         url.strip()
@@ -34,13 +37,16 @@ def get_mcp_urls() -> list[str]:
     ]
 
 
-def create_mcp_client() -> MultiServerMCPClient:
-    mcp_urls = get_mcp_urls()
-
-    mcp_api_key = os.environ.get(
+def get_mcp_api_key() -> str:
+    return os.environ.get(
         "SIMPLE_TEST_MCP_API_KEY",
         "",
     ).strip()
+
+
+def create_mcp_client() -> MultiServerMCPClient:
+    mcp_urls = get_mcp_urls()
+    mcp_api_key = get_mcp_api_key()
 
     if not mcp_urls:
         raise RuntimeError(
@@ -52,16 +58,17 @@ def create_mcp_client() -> MultiServerMCPClient:
             "SIMPLE_TEST_MCP_API_KEY is not configured"
         )
 
-    server_configs: dict[str, dict[str, Any]] = {}
-
-    for index, url in enumerate(mcp_urls):
-        server_configs[f"simple_test_mcp_{index}"] = {
+    server_configs: dict[str, dict[str, Any]] = {
+        f"mcp_server_{index}": {
             "url": url,
             "transport": "streamable_http",
             "headers": {
                 "API-Key": mcp_api_key,
+                "Authorization": "",
             },
         }
+        for index, url in enumerate(mcp_urls)
+    }
 
     return MultiServerMCPClient(server_configs)
 
@@ -104,7 +111,7 @@ async def call_mcp_tool(
 def root() -> dict[str, Any]:
     return {
         "status": "Agent is running",
-        "version": "1.3.0",
+        "version": "1.4.0",
         "mcp_url_configured": bool(
             os.environ.get("SIMPLE_TEST_MCP_URL")
         ),
@@ -117,26 +124,21 @@ def root() -> dict[str, Any]:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {
-        "status": "healthy"
+        "status": "healthy",
     }
 
 
 @app.get("/mcp/config")
 def mcp_config() -> dict[str, Any]:
     """
-    Diagnostic endpoint.
+    Confirm that WSO2 injected the MCP configuration.
 
-    It confirms whether the MCP settings were injected without
-    exposing the actual API key.
+    The API key itself is never returned.
     """
     return {
         "urls": get_mcp_urls(),
-        "url_configured": bool(
-            os.environ.get("SIMPLE_TEST_MCP_URL")
-        ),
-        "api_key_configured": bool(
-            os.environ.get("SIMPLE_TEST_MCP_API_KEY")
-        ),
+        "url_configured": bool(get_mcp_urls()),
+        "api_key_configured": bool(get_mcp_api_key()),
     }
 
 
@@ -190,9 +192,7 @@ async def chat(
             )
 
             return ChatResponse(
-                response=(
-                    f"MCP add_numbers result: {result}"
-                )
+                response=f"MCP add_numbers result: {result}"
             )
 
         if "greet" in normalized_message:
